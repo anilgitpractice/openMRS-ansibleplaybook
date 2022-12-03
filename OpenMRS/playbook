@@ -1,0 +1,133 @@
+---
+- name: Install openMRS application
+  become: yes
+  hosts: all
+  tasks:
+    - name: Update APT package manager repositories cache
+      become: true
+      apt:
+        update_cache: yes
+    - name: Install Java 8
+      become: yes
+      apt:
+        name: "{{ packages }}"
+        state: present
+      vars:
+        packages:
+           - openjdk-8-jdk
+    - name: Creating mysql group
+      ansible.builtin.group:
+        name: mysql
+        state: present
+    - name: Creating user mysql and adding him to mysql group
+      ansible.builtin.user:
+        name: mysql
+        groups: mysql
+        append: yes
+    - name: mysql
+      get_url:
+        url: https://dev.mysql.com/get/Downloads/MySQL-5.6/mysql-5.6.46-linux-glibc2.12-x86_64.tar.gz
+        dest: /home/ubuntu
+    - name: Unarchive a file that is already on the remote machine
+      unarchive:
+        src: /home/ubuntu/mysql-5.6.46-linux-glibc2.12-x86_64.tar.gz
+        dest: /usr/local
+        remote_src: yes
+    - name: install required packages for mysql
+      apt:
+        name: "{{ item }}"
+        update_cache: yes
+        state: present
+      with_items:
+        - libaio1
+        - libncurses5
+        - libnuma-dev
+    - name: Change ownership of mysql directory
+      ansible.builtin.file:
+        path: /usr/local/mysql
+        owner: mysql
+        group: mysql
+        recurse: yes
+        state: directory
+    - name: Copy file
+      ansible.builtin.copy:
+        src: /usr/local/mysql-5.6.46-linux-glibc2.12-x86_64/
+        dest: /usr/local/mysql/
+        remote_src: yes
+    - name: Change to mysql directory and run the shell script
+      ansible.builtin.command:
+        chdir: /usr/local/mysql
+        cmd: scripts/mysql_install_db --user=mysql
+    - name: Change ownership of mysql directory
+      ansible.builtin.file:
+        path: /usr/local/mysql
+        owner: root
+        recurse: yes
+    - name: Change ownership of data directory
+      ansible.builtin.file:
+        path: /usr/local/mysql/data
+        owner: mysql
+        recurse: yes
+    - name: Copying configuration file to different conf file
+      ansible.builtin.copy:
+        src: /usr/local/mysql/support-files/my-default.cnf
+        dest: /etc/my.cnf
+        remote_src: yes
+    - name: Copying configuration file to different conf file
+      ansible.builtin.copy:
+        src: /usr/local/mysql/support-files/mysql.server
+        dest: /etc/init.d/mysql.server
+        remote_src: yes
+        mode: 1766
+    - name: Change to mysql directory and create new user and password
+      ansible.builtin.command:
+        chdir: /usr/local/mysql
+        cmd: bin/mysqld_safe --user=mysql & bin/mysqladmin -u root password newpassword
+    - name: Create a symbolic link
+      ansible.builtin.file:
+        src: /usr/local/mysql/bin/mysql
+        dest: /usr/local/bin/mysql
+        state: link
+      notify:
+        - reload the daemon, enable and start the tomcat service
+    - name: Make sure mysql.server is started
+      sysvinit:
+        name: "mysql.server"
+        state: started
+        enabled: yes
+      handlers:
+    - name: reload the daemon, enable and start the tomcat service
+      ansible.builtin.systemd:
+        name: "mysql.server"
+        daemon_reload: yes
+        enabled: yes
+        state: started
+    - name: Adding Group and user for Tomcat.
+      shell: groupadd tomcat && useradd -s /bin/false -g tomcat -d /opt/tomcat tomcat
+    - name: Downloading Apache Tomcat tar.
+      shell: wget https://archive.apache.org/dist/tomcat/tomcat-7/v7.0.109/bin/apache-tomcat-7.0.109.tar.gz       
+      args:
+        chdir: /tmp   
+    - name: Creating Apache Tomcat home directory.
+      command: mkdir /opt/tomcat
+    - name: Extracting Apache Tomcat.
+      shell: tar -xvzf apache-tomcat-7.0.109.tar.gz -C /opt/tomcat/ --strip-components=1
+    - name: Updating permission.
+      command: "{{ item }}"
+      with_items:
+        - chgrp -R tomcat /opt/tomcat
+        - chmod -R g+r conf
+        - chmod g+x conf
+        - chown -R tomcat webapps/ work/ temp/ logs/
+    - name: Copy file with owner and permissions
+      copy:
+        src: ./tomcat.service
+        dest: /etc/systemd/system/tomcat.service
+    - name: Deamon reload.
+      command: systemctl daemon-reload
+    - name: Starting Apache Tomcat service.
+      service: name=tomcat state=started
+    
+    
+
+
